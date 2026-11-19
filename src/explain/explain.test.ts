@@ -95,6 +95,7 @@ describe('validation - validateInput', () => {
     startTime: '10:00',
     endTime: '11:00',
     reasonCodes: ['OVERLAP', 'TOO_LONG'] as const,
+    decision: 'unavailable' as const,
   };
 
   it('accepts a well-formed input', () => {
@@ -123,6 +124,11 @@ describe('validation - validateInput', () => {
     ).toBe(false);
   });
 
+  it('rejects an invalid decision', () => {
+    expect(validateInput({ ...valid, decision: 'maybe' }).ok).toBe(false);
+    expect(validateInput({ ...valid, decision: undefined }).ok).toBe(false);
+  });
+
   it('rejects non-object input', () => {
     expect(validateInput(null).ok).toBe(false);
     expect(validateInput('hello').ok).toBe(false);
@@ -130,52 +136,102 @@ describe('validation - validateInput', () => {
 });
 
 describe('validation - validateOutput', () => {
-  it('accepts a valid explanation', () => {
-    const r = validateOutput({ explanation: 'Room is free. No conflicts.' });
+  const ctxAvailable = { decision: 'available' as const, startTime: '10:00', endTime: '11:00' };
+  const ctxUnavailable = { decision: 'unavailable' as const, startTime: '10:00', endTime: '11:00' };
+
+  it('accepts a valid explanation consistent with an available decision', () => {
+    const r = validateOutput(
+      { explanation: 'Room is available for 10:00–11:00.' },
+      ctxAvailable,
+    );
     expect(r.ok).toBe(true);
-    expect(r.value?.explanation).toBe('Room is free. No conflicts.');
+    expect(r.value?.explanation).toBe('Room is available for 10:00–11:00.');
+  });
+
+  it('accepts a valid explanation consistent with an unavailable decision', () => {
+    const r = validateOutput(
+      { explanation: 'Room is unavailable for 10:00–11:00.' },
+      ctxUnavailable,
+    );
+    expect(r.ok).toBe(true);
   });
 
   it('rejects empty / whitespace explanation', () => {
-    expect(validateOutput({ explanation: '' }).ok).toBe(false);
-    expect(validateOutput({ explanation: '   ' }).ok).toBe(false);
+    expect(validateOutput({ explanation: '' }, ctxAvailable).ok).toBe(false);
+    expect(validateOutput({ explanation: '   ' }, ctxAvailable).ok).toBe(false);
   });
 
   it('rejects explanations over 300 chars', () => {
     expect(
-      validateOutput({ explanation: 'a'.repeat(EXPLAIN_LIMITS.MAX_CHARS + 1) }).ok,
+      validateOutput({ explanation: 'a'.repeat(EXPLAIN_LIMITS.MAX_CHARS + 1) }, ctxAvailable).ok,
     ).toBe(false);
   });
 
   it('rejects explanations with more than 2 sentences', () => {
     expect(
-      validateOutput({ explanation: 'One. Two. Three.' }).ok,
+      validateOutput({ explanation: 'One. Two. Three.' }, ctxAvailable).ok,
     ).toBe(false);
   });
 
   it('rejects explanations containing HTML', () => {
     expect(
-      validateOutput({ explanation: 'Free. <script>alert(1)</script>' }).ok,
+      validateOutput({ explanation: 'Available. <script>alert(1)</script>' }, ctxAvailable).ok,
     ).toBe(false);
   });
 
   it('rejects non-string explanation', () => {
-    expect(validateOutput({ explanation: 42 }).ok).toBe(false);
-    expect(validateOutput({}).ok).toBe(false);
+    expect(validateOutput({ explanation: 42 }, ctxAvailable).ok).toBe(false);
+    expect(validateOutput({}, ctxAvailable).ok).toBe(false);
+  });
+
+  it('rejects an explanation that claims free/available for an unavailable result', () => {
+    expect(
+      validateOutput({ explanation: 'Room 101 is free.' }, ctxUnavailable).ok,
+    ).toBe(false);
+    expect(
+      validateOutput({ explanation: 'Room 101 is available. No conflicts.' }, ctxUnavailable).ok,
+    ).toBe(false);
+  });
+
+  it('rejects an explanation that claims unavailable for an available result', () => {
+    expect(
+      validateOutput({ explanation: 'Room 101 is unavailable.' }, ctxAvailable).ok,
+    ).toBe(false);
+    expect(
+      validateOutput({ explanation: 'Room 101 is blocked.' }, ctxAvailable).ok,
+    ).toBe(false);
+  });
+
+  it('rejects an explanation containing a time not in the request', () => {
+    expect(
+      validateOutput(
+        { explanation: 'Room 101 is available for 09:00–11:00.' },
+        ctxAvailable,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('allows a negated availability claim for an unavailable result', () => {
+    const r = validateOutput(
+      { explanation: 'Room 101 is not available for 10:00–11:00.' },
+      ctxUnavailable,
+    );
+    expect(r.ok).toBe(true);
   });
 });
 
 describe('mockAdapter', () => {
-  it('builds an available explanation when reasonCodes is empty', async () => {
+  it('builds an available explanation when decision is available', async () => {
     const adapter = createMockAdapter();
     const out = await adapter({
       roomLabel: 'Room 101',
       startTime: '10:00',
       endTime: '11:00',
       reasonCodes: [],
+      decision: 'available',
     });
     expect(out.explanation).toContain('Room 101');
-    expect(out.explanation).toContain('free');
+    expect(out.explanation).toContain('available');
   });
 
   it('builds an unavailable explanation for a reason code', async () => {
@@ -185,6 +241,7 @@ describe('mockAdapter', () => {
       startTime: '10:00',
       endTime: '11:00',
       reasonCodes: ['OVERLAP'],
+      decision: 'unavailable',
     });
     expect(out.explanation).toContain('unavailable');
     expect(out.explanation).toContain('overlap');
@@ -198,6 +255,7 @@ describe('mockAdapter', () => {
       startTime: '10:00',
       endTime: '11:00',
       reasonCodes: [],
+      decision: 'available',
     });
     expect(Date.now() - start).toBeGreaterThanOrEqual(25);
   });
@@ -210,6 +268,7 @@ describe('mockAdapter', () => {
         startTime: '10:00',
         endTime: '11:00',
         reasonCodes: [],
+        decision: 'available',
       }),
     ).rejects.toThrow('boom');
   });
@@ -222,6 +281,7 @@ describe('mockAdapter', () => {
         startTime: '10:00',
         endTime: '11:00',
         reasonCodes: [],
+        decision: 'available',
       }),
     ).rejects.toThrow();
   });
@@ -233,6 +293,7 @@ describe('mockAdapter', () => {
       startTime: '10:00',
       endTime: '11:00',
       reasonCodes: [],
+      decision: 'available',
     });
     expect(out).toEqual({ explanation: '' });
   });
@@ -287,6 +348,35 @@ describe('explainAvailability - fallback behaviour', () => {
     expect(r.isFallback).toBe(true);
   });
 
+  it('returns a fallback when the adapter claims free for an unavailable result', async () => {
+    const adapter = createMockAdapter({
+      forceOutput: { explanation: 'Room 101 is free.' },
+    });
+    const r = await explainAvailability({ ...baseParams, adapter });
+    expect(r.isFallback).toBe(true);
+  });
+
+  it('returns a fallback when the adapter claims unavailable for an available result', async () => {
+    const adapter = createMockAdapter({
+      forceOutput: { explanation: 'Room 101 is unavailable.' },
+    });
+    const r = await explainAvailability({
+      ...baseParams,
+      decision: 'available',
+      reasons: [],
+      adapter,
+    });
+    expect(r.isFallback).toBe(true);
+  });
+
+  it('returns a fallback when the adapter output contains a time not in the request', async () => {
+    const adapter = createMockAdapter({
+      forceOutput: { explanation: 'Room 101 is unavailable for 09:00–11:00.' },
+    });
+    const r = await explainAvailability({ ...baseParams, adapter });
+    expect(r.isFallback).toBe(true);
+  });
+
   it('fallback is deterministic and built from the checker reasons', async () => {
     const adapter = createMockAdapter({ throwError: 'x' });
     const a = await explainAvailability({ ...baseParams, adapter });
@@ -304,6 +394,45 @@ describe('explainAvailability - fallback behaviour', () => {
     });
     expect(r.isFallback).toBe(true);
     expect(r.explanation).toContain('available');
+  });
+});
+
+describe('explainAvailability - unavailable with unrecognised reasons', () => {
+  it('does not call the adapter and returns a fallback that never says free/available', async () => {
+    let called = false;
+    const adapter: ReturnType<typeof createMockAdapter> = async (input) => {
+      called = true;
+      return { explanation: `${input.roomLabel} is free.` };
+    };
+    const r = await explainAvailability({
+      roomLabel: 'Room 101',
+      startTime: '10:00',
+      endTime: '11:00',
+      decision: 'unavailable',
+      reasons: ['something completely unrecognised'],
+      adapter,
+    });
+    expect(called).toBe(false);
+    expect(r.isFallback).toBe(true);
+    expect(r.explanation.toLowerCase()).not.toContain('free');
+    expect(r.explanation.toLowerCase()).not.toMatch(/\bis available\b/);
+    expect(r.explanation.toLowerCase()).not.toMatch(/\bare available\b/);
+  });
+
+  it('fallback for unavailable with empty reasons never says the room is available', async () => {
+    const r = await explainAvailability({
+      roomLabel: 'Room 101',
+      startTime: '10:00',
+      endTime: '11:00',
+      decision: 'unavailable',
+      reasons: [],
+      adapter: createMockAdapter(),
+    });
+    expect(r.isFallback).toBe(true);
+    expect(r.explanation.toLowerCase()).not.toContain('free');
+    expect(r.explanation.toLowerCase()).not.toMatch(/\bis available\b/);
+    expect(r.explanation).toContain('unavailable');
+    expect(r.explanation).toContain('No further details are available.');
   });
 });
 

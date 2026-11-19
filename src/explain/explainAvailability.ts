@@ -1,6 +1,7 @@
 import type { ReasonCode } from './reasonCodes';
 import { mapReasonsToCodes } from './reasonCodes';
 import { validateInput, validateOutput, type ExplainOutput } from './validation';
+import type { Decision } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 3000;
 
@@ -14,6 +15,7 @@ export type ExplainAdapter = (input: {
   startTime: string;
   endTime: string;
   reasonCodes: ReasonCode[];
+  decision: Decision;
 }) => Promise<ExplainOutput>;
 
 interface ExplainParams {
@@ -21,7 +23,7 @@ interface ExplainParams {
   startTime: string;
   endTime: string;
   /** The checker's own decision + reasons — used to build a deterministic fallback. */
-  decision: string;
+  decision: Decision;
   reasons: readonly string[];
   adapter?: ExplainAdapter;
   timeoutMs?: number;
@@ -42,10 +44,18 @@ export async function explainAvailability(
     startTime: params.startTime,
     endTime: params.endTime,
     reasonCodes,
+    decision: params.decision,
   };
 
   const inputCheck = validateInput(input);
   if (!inputCheck.ok || inputCheck.value === null) {
+    return { explanation: fallback(params), isFallback: true };
+  }
+
+  // If the checker says unavailable but none of its reason texts is recognised,
+  // do not ask the adapter — it would have no facts to explain and could claim
+  // the room is free. Return the deterministic fallback instead.
+  if (params.decision === 'unavailable' && reasonCodes.length === 0) {
     return { explanation: fallback(params), isFallback: true };
   }
 
@@ -54,7 +64,11 @@ export async function explainAvailability(
 
   try {
     const result = await withTimeout(adapter(inputCheck.value), timeoutMs);
-    const outputCheck = validateOutput(result);
+    const outputCheck = validateOutput(result, {
+      decision: params.decision,
+      startTime: params.startTime,
+      endTime: params.endTime,
+    });
     if (!outputCheck.ok || outputCheck.value === null) {
       return { explanation: fallback(params), isFallback: true };
     }
@@ -82,20 +96,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
-/** Deterministic fallback built only from the checker's own reasons. */
+/** Deterministic fallback built only from the checker's decision and reasons. */
 function fallback(params: ExplainParams): string {
-  if (params.decision === 'available' || params.reasons.length === 0) {
+  if (params.decision === 'available') {
     return `${params.roomLabel} is available for ${params.startTime}–${params.endTime}. No conflicts were detected.`;
+  }
+  if (params.reasons.length === 0) {
+    return `${params.roomLabel} is unavailable for ${params.startTime}–${params.endTime}. No further details are available.`;
   }
   const first = params.reasons[0];
   return `${params.roomLabel} is unavailable: ${first}`;
 }
 
-/** Default no-op adapter used when none is supplied (pure mock). */
+/** Default mock adapter used when none is supplied (pure mock). */
 const defaultAdapter: ExplainAdapter = async (input) => {
-  if (input.reasonCodes.length === 0) {
+  if (input.decision === 'available' || input.reasonCodes.length === 0) {
+    if (input.decision === 'available') {
+      return {
+        explanation: `${input.roomLabel} is available for ${input.startTime}–${input.endTime}. No conflicts were found.`,
+      };
+    }
     return {
-      explanation: `${input.roomLabel} is free from ${input.startTime} to ${input.endTime}. No conflicts were found.`,
+      explanation: `${input.roomLabel} is unavailable for ${input.startTime}–${input.endTime}. The reason could not be identified.`,
     };
   }
   const first = input.reasonCodes[0];

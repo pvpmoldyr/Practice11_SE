@@ -44,10 +44,13 @@ export function createMockAdapter(
 }
 
 function buildExplanation(input: ExplainInput): string {
-  const { roomLabel, startTime, endTime, reasonCodes } = input;
+  const { roomLabel, startTime, endTime, reasonCodes, decision } = input;
 
-  if (reasonCodes.length === 0) {
-    return `${roomLabel} is free from ${startTime} to ${endTime}. No conflicts were found.`;
+  if (decision === 'available' || reasonCodes.length === 0) {
+    if (decision === 'available') {
+      return `${roomLabel} is available for ${startTime}–${endTime}. No conflicts were found.`;
+    }
+    return `${roomLabel} is unavailable for ${startTime}–${endTime}. The reason could not be identified.`;
   }
 
   const parts = reasonCodes.map((code) => templateFor(code, input));
