@@ -19,6 +19,7 @@ import {
   parseTime,
 } from '@/availability';
 import { DayTimeline } from '@/components/DayTimeline';
+import { ExplanationPanel } from '@/components/ExplanationPanel';
 import type { CheckResult } from '@/types';
 
 function getNowMinutes(): number {
@@ -279,6 +280,12 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                <ExplanationPanel
+                  result={result}
+                  roomLabel={selectedRoom.name}
+                  startTime={startTime}
+                  endTime={endTime}
+                />
               </div>
             )}
 
