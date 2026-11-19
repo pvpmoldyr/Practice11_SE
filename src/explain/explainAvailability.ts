@@ -1,6 +1,7 @@
 import type { ReasonCode } from './reasonCodes';
 import { mapReasonsToCodes } from './reasonCodes';
 import { validateInput, validateOutput, type ExplainOutput } from './validation';
+import { createMockAdapter } from './mockAdapter';
 import type { Decision } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 3000;
@@ -59,7 +60,7 @@ export async function explainAvailability(
     return { explanation: fallback(params), isFallback: true };
   }
 
-  const adapter = params.adapter ?? defaultAdapter;
+  const adapter = params.adapter ?? createMockAdapter();
   const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   try {
@@ -107,21 +108,3 @@ function fallback(params: ExplainParams): string {
   const first = params.reasons[0];
   return `${params.roomLabel} is unavailable: ${first}`;
 }
-
-/** Default mock adapter used when none is supplied (pure mock). */
-const defaultAdapter: ExplainAdapter = async (input) => {
-  if (input.decision === 'available' || input.reasonCodes.length === 0) {
-    if (input.decision === 'available') {
-      return {
-        explanation: `${input.roomLabel} is available for ${input.startTime}–${input.endTime}. No conflicts were found.`,
-      };
-    }
-    return {
-      explanation: `${input.roomLabel} is unavailable for ${input.startTime}–${input.endTime}. The reason could not be identified.`,
-    };
-  }
-  const first = input.reasonCodes[0];
-  return {
-    explanation: `${input.roomLabel} is unavailable for ${input.startTime}–${input.endTime} due to ${first.toLowerCase().replace(/_/g, ' ')}.`,
-  };
-};

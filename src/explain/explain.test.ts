@@ -230,8 +230,7 @@ describe('mockAdapter', () => {
       reasonCodes: [],
       decision: 'available',
     });
-    expect(out.explanation).toContain('Room 101');
-    expect(out.explanation).toContain('available');
+    expect(out.explanation).toBe('Room 101 is available from 10:00 to 11:00.');
   });
 
   it('builds an unavailable explanation for a reason code', async () => {
@@ -244,7 +243,7 @@ describe('mockAdapter', () => {
       decision: 'unavailable',
     });
     expect(out.explanation).toContain('unavailable');
-    expect(out.explanation).toContain('overlap');
+    expect(out.explanation).toContain('overlaps an existing booking');
   });
 
   it('simulates a delay', async () => {
@@ -296,6 +295,106 @@ describe('mockAdapter', () => {
       decision: 'available',
     });
     expect(out).toEqual({ explanation: '' });
+  });
+});
+
+describe('explainAvailability - default path (no adapter passed)', () => {
+  const roomLabel = 'Room 101 — Lecture Hall A';
+
+  const reasonText: Record<string, string> = {
+    INVALID_INPUT: 'Please enter a valid start time, end time and current time.',
+    OUT_OF_DAY: 'Times must fall within the same day (00:00–24:00).',
+    START_AFTER_END: 'Start time must be earlier than end time.',
+    PAST_START: 'Start time must be after the current time.',
+    TOO_LONG: 'Booking duration is 121 min — maximum allowed is 120 min.',
+    ROOM_BLOCKED: 'This room is currently blocked.',
+    OVERLAP: 'Overlaps existing booking "Existing" (10:00–11:00).',
+  };
+
+  const expectedPhrase: Record<string, string> = {
+    INVALID_INPUT: 'the times entered are not valid',
+    OUT_OF_DAY: 'the times must stay within the same day',
+    START_AFTER_END: 'the start time must be earlier than the end time',
+    PAST_START: 'the start time has already passed',
+    TOO_LONG: 'a booking can last at most 120 minutes',
+    ROOM_BLOCKED: 'the room is blocked',
+    OVERLAP: 'it overlaps an existing booking',
+  };
+
+  for (const code of REASON_CODES) {
+    it(`explains a single ${code} reason via the default path without falling back`, async () => {
+      const r = await explainAvailability({
+        roomLabel,
+        startTime: '11:00',
+        endTime: '13:00',
+        decision: 'unavailable',
+        reasons: [reasonText[code]],
+      });
+      expect(r.isFallback).toBe(false);
+      expect(r.explanation).toContain(expectedPhrase[code]);
+      expect(r.explanation.length).toBeLessThanOrEqual(EXPLAIN_LIMITS.MAX_CHARS);
+    });
+  }
+
+  it('explains two reason codes in one sentence without falling back', async () => {
+    const r = await explainAvailability({
+      roomLabel,
+      startTime: '11:00',
+      endTime: '13:00',
+      decision: 'unavailable',
+      reasons: [reasonText.PAST_START, reasonText.OVERLAP],
+    });
+    expect(r.isFallback).toBe(false);
+    expect(r.explanation).toContain(expectedPhrase.PAST_START);
+    expect(r.explanation).toContain(expectedPhrase.OVERLAP);
+    expect(r.explanation).toContain(' and ');
+    expect(r.explanation.length).toBeLessThanOrEqual(EXPLAIN_LIMITS.MAX_CHARS);
+  });
+
+  it('explains three reason codes joined with commas and "and" without falling back', async () => {
+    const r = await explainAvailability({
+      roomLabel,
+      startTime: '11:00',
+      endTime: '13:00',
+      decision: 'unavailable',
+      reasons: [reasonText.PAST_START, reasonText.OVERLAP, reasonText.TOO_LONG],
+    });
+    expect(r.isFallback).toBe(false);
+    expect(r.explanation).toContain(expectedPhrase.PAST_START);
+    expect(r.explanation).toContain(expectedPhrase.OVERLAP);
+    expect(r.explanation).toContain(expectedPhrase.TOO_LONG);
+    expect(r.explanation).toMatch(/, and |, /);
+    expect(r.explanation.length).toBeLessThanOrEqual(EXPLAIN_LIMITS.MAX_CHARS);
+  });
+
+  it('available result uses the available template via the default path', async () => {
+    const r = await explainAvailability({
+      roomLabel,
+      startTime: '11:00',
+      endTime: '12:00',
+      decision: 'available',
+      reasons: [],
+    });
+    expect(r.isFallback).toBe(false);
+    expect(r.explanation).toBe('Room 101 — Lecture Hall A is available from 11:00 to 12:00.');
+  });
+
+  it('never shows raw code names such as PAST_START or "past start" in the text', async () => {
+    for (const code of REASON_CODES) {
+      const r = await explainAvailability({
+        roomLabel,
+        startTime: '11:00',
+        endTime: '13:00',
+        decision: 'unavailable',
+        reasons: [reasonText[code]],
+      });
+      expect(r.isFallback).toBe(false);
+      const lower = r.explanation.toLowerCase();
+      const asWords = code.toLowerCase().replace(/_/g, ' ');
+      // The raw code (with or without underscores) must never appear as a token.
+      const pattern = new RegExp(['\\b', asWords, '\\b'].join(''));
+      expect(lower).not.toMatch(pattern);
+    }
   });
 });
 

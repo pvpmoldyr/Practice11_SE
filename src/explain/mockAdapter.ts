@@ -46,38 +46,41 @@ export function createMockAdapter(
 function buildExplanation(input: ExplainInput): string {
   const { roomLabel, startTime, endTime, reasonCodes, decision } = input;
 
-  if (decision === 'available' || reasonCodes.length === 0) {
-    if (decision === 'available') {
-      return `${roomLabel} is available for ${startTime}–${endTime}. No conflicts were found.`;
-    }
-    return `${roomLabel} is unavailable for ${startTime}–${endTime}. The reason could not be identified.`;
+  if (decision === 'available') {
+    return `${roomLabel} is available from ${startTime} to ${endTime}.`;
+  }
+  if (reasonCodes.length === 0) {
+    return `${roomLabel} is unavailable for ${startTime}–${endTime}.`;
   }
 
-  const parts = reasonCodes.map((code) => templateFor(code, input));
-  const first = parts[0];
-  if (parts.length === 1) {
-    return `${roomLabel} is unavailable for ${startTime}–${endTime}. ${first}`;
-  }
-  return `${roomLabel} is unavailable for ${startTime}–${endTime}. ${first} Also ${parts[1].toLowerCase()}`;
+  const phrases = reasonCodes.map((code) => phraseFor(code));
+  const reasonText = joinPhrases(phrases);
+  return `${roomLabel} is unavailable for ${startTime}–${endTime} because ${reasonText}.`;
 }
 
-function templateFor(code: ReasonCode, input: ExplainInput): string {
+function joinPhrases(phrases: string[]): string {
+  if (phrases.length === 1) return phrases[0];
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
+}
+
+function phraseFor(code: ReasonCode): string {
   switch (code) {
     case 'INVALID_INPUT':
-      return 'The entered times are not valid.';
+      return 'the times entered are not valid';
     case 'OUT_OF_DAY':
-      return 'The requested times fall outside the 00:00–24:00 day range.';
+      return 'the times must stay within the same day';
     case 'START_AFTER_END':
-      return 'The start time must come before the end time.';
+      return 'the start time must be earlier than the end time';
     case 'PAST_START':
-      return 'The start time must be in the future.';
+      return 'the start time has already passed';
     case 'TOO_LONG':
-      return 'The booking exceeds the maximum duration of 120 minutes.';
+      return 'a booking can last at most 120 minutes';
     case 'ROOM_BLOCKED':
-      return `${input.roomLabel} is currently blocked.`;
+      return 'the room is blocked';
     case 'OVERLAP':
-      return `The requested slot overlaps an existing booking.`;
+      return 'it overlaps an existing booking';
     default:
-      return 'The request could not be confirmed.';
+      return 'the request could not be confirmed';
   }
 }
